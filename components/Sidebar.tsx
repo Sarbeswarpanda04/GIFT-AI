@@ -46,7 +46,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-slate-800 h-16">
            <div className="flex items-center space-x-2 text-gray-900 dark:text-white font-bold">
               <SparkleIcon className="w-6 h-6 text-blue-500" />
-              <span className="text-lg tracking-tight">Gemini Omni</span>
+              <span className="text-lg tracking-tight">Gift Ai</span>
            </div>
            {/* Close button for mobile/desktop toggling */}
            <button onClick={onToggle} className="p-2 text-gray-500 dark:text-slate-500 hover:text-gray-900 dark:hover:text-white rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors">

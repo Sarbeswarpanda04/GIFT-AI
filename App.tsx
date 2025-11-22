@@ -426,7 +426,7 @@ function App() {
                 </button>
                 
                 <h1 className="font-bold text-lg tracking-tight text-gray-900 dark:text-white truncate">
-                    {viewMode === ViewMode.LIBRARY ? 'Media Library' : viewMode === ViewMode.PROFILE ? 'Profile' : 'Gemini Omni'}
+                    {viewMode === ViewMode.LIBRARY ? 'Media Library' : viewMode === ViewMode.PROFILE ? 'Profile' : 'Gift Ai'}
                 </h1>
                 </div>
                 
@@ -478,8 +478,8 @@ function App() {
                                     <SparkleIcon className="w-10 h-10 text-blue-500" />
                                 </div>
                                 <div className="space-y-2 max-w-md">
-                                    <h2 className="text-xl font-semibold text-gray-800 dark:text-white">Hello {profile?.name || 'Creator'}</h2>
-                                    <p className="text-sm leading-relaxed">I'm your Gemini Omni assistant. I can chat, generate images, and help with complex tasks.</p>
+                                    <h2 className="text-xl font-semibold text-gray-800 dark:text-white">Hello {profile?.name || 'Student'}</h2>
+                                    <p className="text-sm leading-relaxed">I'm your Gift Ai assistant. I can chat, generate images, and help with complex tasks.</p>
                                 </div>
                             </div>
                             )}
