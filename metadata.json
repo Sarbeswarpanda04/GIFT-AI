@@ -1,0 +1,9 @@
+{
+  "name": "Gemini 3 Pro Omni-Assistant",
+  "description": "A unified multimodal AI assistant powered by Gemini 3 Pro, featuring Live API, Veo video generation, high-fidelity image generation, and grounding.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera",
+    "geolocation"
+  ]
+}
