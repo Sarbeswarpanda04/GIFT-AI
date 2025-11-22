@@ -53,6 +53,8 @@
         color: #0f172a;
         overflow: hidden; /* Prevent body scroll, manage inside app */
         -webkit-tap-highlight-color: transparent;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
       }
       .dark body {
         background-color: #0f172a;
@@ -65,6 +67,18 @@
       .no-scrollbar {
         -ms-overflow-style: none;
         scrollbar-width: none;
+      }
+      /* Ensure pre/code wraps correctly */
+      pre {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
+      /* Markdown content specific styles */
+      strong {
+        font-weight: 700;
+      }
+      em {
+        font-style: italic;
       }
     </style>
   <script type="importmap">

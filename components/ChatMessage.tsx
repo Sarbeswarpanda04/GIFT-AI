@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { ChatMessage as ChatMessageType, MessageRole } from '../types';
 import { SparkleIcon, BrainIcon } from './Icons';
 
@@ -6,11 +6,94 @@ interface ChatMessageProps {
   message: ChatMessageType;
 }
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
+const MarkdownRenderer = ({ content }: { content: string }) => {
+  // 1. Handle Code Blocks (```code```)
+  const blocks = useMemo(() => content.split(/(```[\s\S]*?```)/g), [content]);
+
+  return (
+    <div className="space-y-2">
+      {blocks.map((block, index) => {
+        if (block.startsWith('```') && block.endsWith('```')) {
+          // Extract content
+          const inner = block.slice(3, -3);
+          const firstNewLine = inner.indexOf('\n');
+          const lang = firstNewLine > -1 ? inner.slice(0, firstNewLine).trim() : '';
+          const code = firstNewLine > -1 ? inner.slice(firstNewLine + 1) : inner;
+
+          return (
+            <div key={index} className="my-3 rounded-lg overflow-hidden bg-[#1e1e1e] border border-gray-800 shadow-md">
+              {lang && (
+                <div className="bg-[#2d2d2d] px-3 py-1.5 text-xs text-gray-400 border-b border-gray-700 font-mono flex items-center justify-between">
+                  <span className="uppercase">{lang}</span>
+                </div>
+              )}
+              <div className="p-3 overflow-x-auto">
+                <pre className="text-sm font-mono text-[#d4d4d4] whitespace-pre">
+                  <code>{code}</code>
+                </pre>
+              </div>
+            </div>
+          );
+        }
+        // Render Inline Markdown for non-code-block parts
+        return <InlineMarkdown key={index} text={block} />;
+      })}
+    </div>
+  );
+};
+
+const InlineMarkdown = ({ text }: { text: string }) => {
+  // Filter out empty strings to prevent empty paragraphs
+  if (!text) return null;
+  
+  // Split by double newline to preserve paragraphs
+  const paragraphs = text.split(/\n\n+/g);
+
+  return (
+    <>
+      {paragraphs.map((paragraph, pIdx) => (
+        <p key={pIdx} className="whitespace-pre-wrap mb-2 last:mb-0 leading-relaxed">
+           {renderRichText(paragraph)}
+        </p>
+      ))}
+    </>
+  );
+};
+
+// Helper to render **bold**, *italic*, `code`
+const renderRichText = (text: string) => {
+  // We split by the most complex token first: Inline Code, then Bold, then Italic
+  // Regex captures the delimiter content to keep it in the array
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g);
+
+  return parts.map((part, i) => {
+    // Inline Code
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return (
+        <code key={i} className="bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded text-[0.9em] font-mono text-pink-600 dark:text-pink-400 mx-0.5">
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    // Bold
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={i} className="font-semibold text-gray-900 dark:text-white">{part.slice(2, -2)}</strong>;
+    }
+    // Italic
+    if (part.startsWith('*') && part.endsWith('*')) {
+      return <em key={i} className="italic">{part.slice(1, -1)}</em>;
+    }
+    // Plain text
+    return part;
+  });
+};
+
+
+export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) => {
   const isModel = message.role === MessageRole.MODEL;
 
   return (
-    <div className={`flex w-full mb-4 ${isModel ? 'justify-start' : 'justify-end'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+    <div className={`flex w-full mb-6 ${isModel ? 'justify-start' : 'justify-end'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
       <div className={`flex max-w-[95%] md:max-w-[85%] lg:max-w-[75%] ${isModel ? 'flex-row' : 'flex-row-reverse'}`}>
         
         {/* Avatar */}
@@ -19,13 +102,13 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
         </div>
 
         {/* Content Bubble */}
-        <div className={`flex flex-col p-3 md:p-4 rounded-2xl ${isModel ? 'bg-white dark:bg-gemini-panel rounded-tl-none border border-gray-200 dark:border-slate-800' : 'bg-blue-600 rounded-tr-none'} text-gray-900 dark:text-gemini-text shadow-sm dark:shadow-md overflow-hidden`}>
+        <div className={`flex flex-col p-3 md:p-5 rounded-2xl ${isModel ? 'bg-white dark:bg-gemini-panel rounded-tl-none border border-gray-200 dark:border-slate-800' : 'bg-blue-600 rounded-tr-none'} text-gray-900 dark:text-gemini-text shadow-sm dark:shadow-md overflow-hidden w-full min-w-0`}>
           
           {/* Attachments (User uploaded) */}
           {message.attachments && message.attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-3">
               {message.attachments.map((att, idx) => (
-                <div key={idx} className="relative group overflow-hidden rounded-lg border border-white/20 dark:border-white/10">
+                <div key={idx} className="relative group overflow-hidden rounded-lg border border-white/20 dark:border-white/10 bg-black/5">
                   {att.mimeType.startsWith('image/') ? (
                     <img src={att.previewUrl} alt="attachment" className="w-24 h-24 object-cover" />
                   ) : (
@@ -38,27 +121,31 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
             </div>
           )}
 
-          {/* Text Content */}
+          {/* Text Content with Markdown */}
           {message.text && (
-             <div className={`text-[15px] md:text-[16px] leading-relaxed whitespace-pre-wrap break-words ${isModel ? 'text-gray-800 dark:text-slate-200' : 'text-white'}`}>
-               {message.text}
+             <div className={`text-[15px] md:text-[16px] break-words ${isModel ? 'text-gray-800 dark:text-slate-200' : 'text-white'}`}>
+               {isModel ? <MarkdownRenderer content={message.text} /> : <p className="whitespace-pre-wrap">{message.text}</p>}
              </div>
           )}
 
           {/* Generated Media */}
-          {message.generatedMedia && message.generatedMedia.map((media, idx) => (
-            <div key={idx} className="mt-4 rounded-xl overflow-hidden border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-black/40 shadow-lg">
-              {media.type === 'image' && (
-                <img src={media.url} alt="Generated" className="w-full h-auto max-h-[500px] object-contain" />
-              )}
-              {media.type === 'video' && (
-                 <video src={media.url} controls autoPlay loop muted className="w-full h-auto max-h-[500px]" />
-              )}
-              {media.type === 'audio' && (
-                 <audio src={media.url} controls className="w-full mt-1" />
-              )}
+          {message.generatedMedia && message.generatedMedia.length > 0 && (
+            <div className="mt-4 grid gap-4">
+                {message.generatedMedia.map((media, idx) => (
+                    <div key={idx} className="rounded-xl overflow-hidden border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-black/40 shadow-lg">
+                    {media.type === 'image' && (
+                        <img src={media.url} alt="Generated" className="w-full h-auto max-h-[500px] object-contain" />
+                    )}
+                    {media.type === 'video' && (
+                        <video src={media.url} controls autoPlay loop muted className="w-full h-auto max-h-[500px]" />
+                    )}
+                    {media.type === 'audio' && (
+                        <audio src={media.url} controls className="w-full mt-1" />
+                    )}
+                    </div>
+                ))}
             </div>
-          ))}
+          )}
 
           {/* Grounding Sources */}
           {message.groundingUrls && message.groundingUrls.length > 0 && (
@@ -68,7 +155,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
                 {message.groundingUrls.map((src, idx) => (
                   <a key={idx} href={src.uri} target="_blank" rel="noopener noreferrer" className="flex items-center space-x-1 text-xs bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-blue-600 dark:text-blue-300 px-2.5 py-1.5 rounded-md truncate max-w-[200px] transition-colors border border-gray-200 dark:border-slate-700">
                     <span className="truncate">{src.title || new URL(src.uri).hostname}</span>
-                    <svg className="w-3 h-3 opacity-50 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                   </a>
                 ))}
               </div>
@@ -77,7 +163,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
           
           {/* Thinking Indicator */}
           {message.isThinking && (
-              <div className="flex items-center space-x-2 text-xs text-gray-500 dark:text-slate-400 italic mt-2 animate-pulse">
+              <div className="flex items-center space-x-2 text-xs text-gray-500 dark:text-slate-400 italic mt-2 animate-pulse bg-gray-100 dark:bg-slate-800/50 py-1 px-2 rounded-md self-start">
                   <BrainIcon className="w-3 h-3" />
                   <span>Reasoning...</span>
               </div>
@@ -87,4 +173,4 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
       </div>
     </div>
   );
-};
+});

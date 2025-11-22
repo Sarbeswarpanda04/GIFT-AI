@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { MessageRole, ChatMessage, Attachment, AppMode, GenerationConfigState, ASPECT_RATIOS, IMAGE_SIZES, ViewMode, ConversationSession, SavedCreation, UserProfile } from './types';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { MessageRole, ChatMessage, Attachment, AppMode, GenerationConfigState, ViewMode, ConversationSession, SavedCreation, UserProfile } from './types';
 import { ChatMessage as ChatMessageComponent } from './components/ChatMessage';
 import { InputArea } from './components/InputArea';
 import { blobToBase64 } from './utils/audioUtils';
@@ -76,9 +76,26 @@ function App() {
     }
 
     if (lastId && loadedSessions.find(s => s.id === lastId)) {
-        loadSession(lastId, loadedSessions);
+        // Manually load without calling loadSession to avoid state batching issues in effect
+        setCurrentSessionId(lastId);
+        setMessages(loadedSessions.find(s => s.id === lastId)!.messages);
+        setViewMode(ViewMode.CHAT);
     } else {
-        createNewSession(loadedSessions);
+        // Create new session logic inline
+        const newId = Date.now().toString();
+        const newSession: ConversationSession = {
+            id: newId,
+            title: 'New Chat',
+            messages: [],
+            lastModified: Date.now(),
+            preview: ''
+        };
+        setSessions([newSession, ...loadedSessions]);
+        setCurrentSessionId(newId);
+        setMessages([]);
+        StorageService.saveSession(newSession);
+        StorageService.setLastSessionId(newId);
+        setViewMode(ViewMode.CHAT);
     }
 
     return () => window.removeEventListener('resize', handleResize);
@@ -87,15 +104,18 @@ function App() {
   // Auto-scroll
   useEffect(() => {
     if (viewMode === ViewMode.CHAT) {
-        scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        setTimeout(() => {
+            scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
     }
-  }, [messages, viewMode]);
+  }, [messages.length, viewMode, isProcessing]);
 
   // Save session on update
   useEffect(() => {
       if (currentSessionId && messages.length > 0) {
           const session = sessions.find(s => s.id === currentSessionId);
-          if (session) {
+          // Only update if messages actually changed to avoid loops (React compares refs)
+          if (session && session.messages !== messages) {
               const updatedSession: ConversationSession = {
                   ...session,
                   messages,
@@ -105,29 +125,33 @@ function App() {
                     : session.title
               };
               StorageService.saveSession(updatedSession);
+              // Update session list in UI without full reload
+              setSessions(prev => prev.map(s => s.id === updatedSession.id ? updatedSession : s));
           }
       }
   }, [messages, currentSessionId]);
 
-  const toggleTheme = () => {
-      const newTheme: 'light' | 'dark' = theme === 'light' ? 'dark' : 'light';
-      setTheme(newTheme);
-      if (profile) {
-          const updated: UserProfile = { 
-              ...profile, 
-              preferences: { 
-                  ...profile.preferences, 
-                  theme: newTheme 
-              } 
-          };
-          setProfile(updated);
-          StorageService.saveProfile(updated);
-      }
-  };
+  const toggleTheme = useCallback(() => {
+      setTheme(prev => {
+          const newTheme = prev === 'light' ? 'dark' : 'light';
+          if (profile) {
+              const updated: UserProfile = { 
+                  ...profile, 
+                  preferences: { 
+                      ...profile.preferences, 
+                      theme: newTheme 
+                  } 
+              };
+              setProfile(updated);
+              StorageService.saveProfile(updated);
+          }
+          return newTheme;
+      });
+  }, [profile]);
 
   // --- Session Management ---
 
-  const createNewSession = (currentList = sessions) => {
+  const createNewSession = useCallback((currentList = sessions) => {
       const newId = Date.now().toString();
       const newSession: ConversationSession = {
           id: newId,
@@ -142,30 +166,34 @@ function App() {
       StorageService.saveSession(newSession);
       StorageService.setLastSessionId(newId);
       setViewMode(ViewMode.CHAT);
-  };
+      if (isMobile) setSidebarOpen(false);
+  }, [sessions, isMobile]);
 
-  const loadSession = (id: string, currentList = sessions) => {
-      const session = currentList.find(s => s.id === id);
+  const loadSession = useCallback((id: string) => {
+      const session = sessions.find(s => s.id === id);
       if (session) {
           setCurrentSessionId(id);
           setMessages(session.messages);
           StorageService.setLastSessionId(id);
           setViewMode(ViewMode.CHAT);
+          if (isMobile) setSidebarOpen(false);
       }
-  };
+  }, [sessions, isMobile]);
 
-  const handleDeleteSession = (id: string) => {
+  const handleDeleteSession = useCallback((id: string) => {
       StorageService.deleteSession(id);
-      const newSessions = sessions.filter(s => s.id !== id);
-      setSessions(newSessions);
-      if (currentSessionId === id) {
-          if (newSessions.length > 0) {
-              loadSession(newSessions[0].id, newSessions);
-          } else {
-              createNewSession(newSessions);
+      setSessions(prev => {
+          const newSessions = prev.filter(s => s.id !== id);
+          if (currentSessionId === id) {
+              if (newSessions.length > 0) {
+                  loadSession(newSessions[0].id);
+              } else {
+                  createNewSession(newSessions);
+              }
           }
-      }
-  };
+          return newSessions;
+      });
+  }, [currentSessionId, loadSession, createNewSession]);
 
   // --- Feature Handlers ---
 
@@ -219,17 +247,22 @@ function App() {
     setInputValue('');
     setAttachments([]);
 
-    if (messages.length === 0) {
+    // Optimistic Title Update for New Chat
+    if (messages.length === 0 && currentSessionId) {
         setSessions(prev => prev.map(s => s.id === currentSessionId ? { ...s, title: userMsg.text?.slice(0, 30) || "Media" } : s));
     }
 
     try {
+        const responseId = (Date.now() + 1).toString();
         let responseMsg: ChatMessage = {
-            id: (Date.now() + 1).toString(),
+            id: responseId,
             role: MessageRole.MODEL,
             timestamp: Date.now(),
             isThinking: config.thinkingMode
         };
+
+        // Add placeholder immediately
+        setMessages(prev => [...prev, responseMsg]);
 
         if (mode === AppMode.IMAGE_GEN) {
             const resp = await GeminiService.generateImage(userMsg.text || "Image", config);
@@ -240,15 +273,20 @@ function App() {
                 }
             }
             if(imgUrl) {
-                responseMsg.generatedMedia = [{ type: 'image', url: imgUrl, mimeType: 'image/png' }];
-                responseMsg.text = "Here is your generated image.";
+                const media = [{ type: 'image' as const, url: imgUrl, mimeType: 'image/png' }];
+                responseMsg = {
+                    ...responseMsg,
+                    text: "Here is your generated image.",
+                    generatedMedia: media,
+                    isThinking: false
+                };
                 saveGeneratedMedia(imgUrl, 'image', userMsg.text || "Generated Image");
             }
         } 
         else {
             const files = userMsg.attachments?.map(a => ({ mimeType: a.mimeType, data: a.base64Data! })) || [];
             const result = await GeminiService.generateChatResponse(userMsg.text || "", files, config);
-            const text = result.text;
+            const text = result.text || "No response generated.";
             
             const groundingChunks = result.candidates?.[0]?.groundingMetadata?.groundingChunks;
             const sources = groundingChunks?.map((c: any) => {
@@ -265,27 +303,31 @@ function App() {
                  }
             });
 
-            responseMsg.text = text;
-            responseMsg.groundingUrls = sources;
-            if(generatedImages.length > 0) responseMsg.generatedMedia = generatedImages;
-            responseMsg.isThinking = false;
+            responseMsg = {
+                ...responseMsg,
+                text: text,
+                groundingUrls: sources,
+                generatedMedia: generatedImages.length > 0 ? generatedImages : undefined,
+                isThinking: false
+            };
         }
 
-        setMessages(prev => {
-             const exists = prev.find(m => m.id === responseMsg.id);
-             if (exists) return prev.map(m => m.id === responseMsg.id ? responseMsg : m);
-             return [...prev, responseMsg];
-        });
+        // Update the placeholder with real data
+        setMessages(prev => prev.map(m => m.id === responseId ? responseMsg : m));
 
     } catch (error: any) {
         console.error(error);
         const errMsg: ChatMessage = {
             id: Date.now().toString(),
             role: MessageRole.SYSTEM,
-            text: `Error: ${error.message || "Something went wrong."}`,
+            text: `Error: ${error.message || "Something went wrong. Please try again."}`,
             timestamp: Date.now()
         };
-        setMessages(prev => [...prev, errMsg]);
+        // Remove the placeholder if it exists (loading state) and add error
+        setMessages(prev => {
+             const filtered = prev.filter(m => !m.isThinking); // simplistic removal of stuck loading
+             return [...filtered, errMsg];
+        });
     } finally {
         setIsProcessing(false);
     }
@@ -363,8 +405,8 @@ function App() {
             onChangeView={setViewMode}
             sessions={sessions}
             currentSessionId={currentSessionId || ''}
-            onSelectSession={(id) => loadSession(id)}
-            onNewChat={() => createNewSession()}
+            onSelectSession={loadSession}
+            onNewChat={createNewSession}
             onDeleteSession={handleDeleteSession}
             isMobile={isMobile}
         />
@@ -373,11 +415,12 @@ function App() {
         <div className={`flex-1 flex flex-col h-full transition-all duration-300 ${(!isMobile && sidebarOpen) ? 'ml-72' : 'ml-0'}`}>
             
             {/* Header */}
-            <header className="flex-none h-16 px-4 border-b border-gray-200 dark:border-slate-800 bg-white/90 dark:bg-gemini-dark/90 backdrop-blur flex items-center justify-between z-10">
+            <header className="flex-none h-16 px-4 border-b border-gray-200 dark:border-slate-800 bg-white/90 dark:bg-gemini-dark/90 backdrop-blur flex items-center justify-between z-10 relative">
                 <div className="flex items-center space-x-3">
                 <button 
                     onClick={() => setSidebarOpen(!sidebarOpen)}
                     className="p-2 -ml-2 text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-white rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
+                    aria-label="Toggle Sidebar"
                 >
                     <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
                 </button>
@@ -391,7 +434,7 @@ function App() {
                     <button 
                         onClick={toggleTheme}
                         className="p-2 rounded-full bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
-                        title="Toggle Theme"
+                        title={theme === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
                     >
                         {theme === 'dark' ? <SunIcon className="w-4 h-4" /> : <MoonIcon className="w-4 h-4" />}
                     </button>
@@ -436,12 +479,14 @@ function App() {
                                 </div>
                                 <div className="space-y-2 max-w-md">
                                     <h2 className="text-xl font-semibold text-gray-800 dark:text-white">Hello {profile?.name || 'Creator'}</h2>
-                                    <p className="text-sm leading-relaxed">I'm your Gemini Omni assistant. I can chat and help with complex tasks.</p>
+                                    <p className="text-sm leading-relaxed">I'm your Gemini Omni assistant. I can chat, generate images, and help with complex tasks.</p>
                                 </div>
                             </div>
                             )}
                             {messages.map(msg => <ChatMessageComponent key={msg.id} message={msg} />)}
-                            {isProcessing && !messages[messages.length-1]?.isThinking && (
+                            
+                            {/* Loading Skeleton (if processing and no placeholder active) */}
+                            {isProcessing && !messages[messages.length-1]?.isThinking && messages[messages.length-1]?.role !== MessageRole.MODEL && (
                                 <div className="flex justify-start animate-pulse pl-2">
                                     <div className="flex items-center space-x-2 bg-white dark:bg-gemini-panel px-4 py-3 rounded-2xl rounded-tl-none text-sm text-gray-600 dark:text-slate-300 border border-gray-200 dark:border-slate-700/50 shadow-sm">
                                         <SparkleIcon className="w-4 h-4 animate-spin" />
